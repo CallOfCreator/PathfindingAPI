@@ -32,7 +32,7 @@ All players in the lobby need both Pathfinding API and Reactor installed.
 
 Reference `PathfindingAPI.dll` directly or add it as a project reference.
 
-There is currently no NuGet package.
+or reference the [NuGet package](https://www.nuget.org/packages/CallOfCreator.PathfindingAPI)
 
 Then add the following dependency to your main plugin class:
 
