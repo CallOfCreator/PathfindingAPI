@@ -1,0 +1,16 @@
+**/bin/
+**/obj/
+.idea/
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.nupkg
+*.snupkg
+TestingResults/
+Testing/
+*.log
+.DS_Store
+Thumbs.db
