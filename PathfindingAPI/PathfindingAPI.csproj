@@ -1,12 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <VersionPrefix>1.0.0</VersionPrefix>
+        <PackageId>CallOfCreator.PathfindingAPI</PackageId>
         <Description>An Among Us mod that adds pathfinding to the game for developers to use</Description>
         <Authors>CallofCreator</Authors>
         <TargetFramework>net6.0</TargetFramework>
         <LangVersion>12</LangVersion>
         <DebugType>embedded</DebugType>
         <Configurations>Debug;Release;</Configurations>
+        <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <RepositoryUrl>https://github.com/CallOfCreator/PathfindingAPI</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
     </PropertyGroup>
 
     <ItemGroup>
@@ -18,7 +23,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <Folder Include="Core\"/>
+        <None Include="..\README.md" Pack="true" PackagePath="/"/>
     </ItemGroup>
 
     <Target Name="Copy" AfterTargets="Build" Condition="'$(AmongUs)' != ''">
