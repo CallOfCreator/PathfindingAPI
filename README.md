@@ -1,3 +1,9 @@
+<p align="center">
+  <img src="github/logo.png" width="180" alt="Pathfinding API Logo">
+</p>
+
+# Pathfinding API
+
 # Pathfinding API
 
 An Among Us mod that adds pathfinding support for other mod developers to use.
