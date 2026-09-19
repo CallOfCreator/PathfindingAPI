@@ -4,8 +4,6 @@
 
 # Pathfinding API
 
-# Pathfinding API
-
 An Among Us mod that adds pathfinding support for other mod developers to use.
 
 - [Features](#features)
