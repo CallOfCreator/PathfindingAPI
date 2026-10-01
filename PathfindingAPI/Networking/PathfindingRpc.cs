@@ -1,4 +1,5 @@
 using Reactor.Networking.Attributes;
+using PathfindingAPI.Compatibility;
 using UnityEngine;
 
 namespace PathfindingAPI.Networking;
@@ -15,6 +16,7 @@ public static class PathfindingRpc
         {
             var door = ship.AllDoors[i];
             if (!door || door.Id != doorId || door.IsOpen || !door.isActiveAndEnabled) continue;
+            if (SubmergedCompatibility.Get(ship)?.IsElevatorDoor(door) == true) return;
             var manual = door.TryCast<ManualDoor>();
             var plain = door.TryCast<PlainDoor>();
             var collider = manual ? manual.myCollider : plain ? plain.myCollider : null;

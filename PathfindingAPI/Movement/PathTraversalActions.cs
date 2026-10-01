@@ -1,8 +1,10 @@
 using PathfindingAPI.Core;
+using PathfindingAPI.Compatibility;
 using PathfindingAPI.Navigation;
 using PathfindingAPI.Networking;
 using System;
 using System.Collections;
+using System.Linq;
 using UnityEngine;
 
 namespace PathfindingAPI.Movement;
@@ -16,6 +18,15 @@ public static class PathTraversalActions
         if (path == null || crossing == null || !PlayerPathExtensions.CanContinue(player, path.Ship) || !crossing.Source || crossing.PointIndex < 0 || crossing.PointIndex + 1 >= path.Points.Length || Vector2.Distance(player.GetTruePosition(), path.Points[crossing.PointIndex]) > 0.75f)
         {
             completed?.Invoke(false);
+            yield break;
+        }
+
+        var submerged = SubmergedCompatibility.Get(path.Ship);
+        if (crossing.Type == PathTraversal.Elevator)
+        {
+            var elevator = submerged?.Elevators.FirstOrDefault(item => item.Source == crossing.Source);
+            if (elevator == null) completed?.Invoke(false);
+            else yield return elevator.Traverse(player, path.Points[crossing.PointIndex + 1], completed, timeout);
             yield break;
         }
 
@@ -119,6 +130,18 @@ public static class PathTraversalActions
                 traversed = false;
                 destination = path.Points[crossing.PointIndex];
                 exit = vent;
+            }
+
+            while (PlayerPathExtensions.CanContinue(player, path.Ship) && elapsed < timeout && submerged != null &&
+                   (submerged.InVentTransition() || (exit.Id == submerged.EngineVentId && player.MyPhysics.Animations.Animator.IsPlaying(player.MyPhysics.Animations.group.ExitVentAnim))))
+            {
+                elapsed += Time.deltaTime;
+                yield return null;
+            }
+            if (!PlayerPathExtensions.CanContinue(player, path.Ship) || elapsed >= timeout)
+            {
+                completed?.Invoke(false);
+                yield break;
             }
 
             player.MyPhysics.RpcExitVent(exit.Id);

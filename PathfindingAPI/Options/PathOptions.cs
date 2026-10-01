@@ -11,6 +11,7 @@ public class PathOptions
     public bool UseZiplines = true;
     public bool UseDecontamination = true;
     public bool UseMovingPlatforms = true;
+    public bool UseElevators = true;
     public bool WaitForDoors = false;
     public bool UseVents = false;
     public float WallWeight = 1.5f;

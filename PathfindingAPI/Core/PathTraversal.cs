@@ -7,5 +7,6 @@ public enum PathTraversal
     Decontamination,
     Door,
     MovingPlatform,
-    Vent
+    Vent,
+    Elevator
 }

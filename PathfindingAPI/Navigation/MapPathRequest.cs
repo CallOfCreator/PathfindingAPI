@@ -1,4 +1,5 @@
 using PathfindingAPI.Core;
+using PathfindingAPI.Compatibility;
 using PathfindingAPI.Options;
 using System;
 using System.Collections;
@@ -13,6 +14,7 @@ public class MapPathRequest
     public readonly List<PathLink> links = new();
     public readonly List<Component> linkSources = new();
     public readonly Il2CppStructArray<RaycastHit2D> crossingHits = new(32);
+    public readonly SubmergedCompatibility submerged;
     public readonly PlayerControl actor;
     public readonly ShipStatus ship;
     public readonly PathOptions options;
@@ -41,6 +43,13 @@ public class MapPathRequest
         if (!ship || !float.IsFinite(start.x) || !float.IsFinite(start.y) || !float.IsFinite(goal.x) || !float.IsFinite(goal.y))
         {
             Finish(PathStatus.InvalidEndpoint);
+            return;
+        }
+
+        submerged = SubmergedCompatibility.Get(ship);
+        if ((int)ship.Type == 6 && SubmergedCompatibility.IsLoaded() && (submerged == null || !submerged.Supported))
+        {
+            Finish(PathStatus.Obstructed);
             return;
         }
 
@@ -132,6 +141,7 @@ public class MapPathRequest
 
     public bool CanMove(Vector2 from, Vector2 to)
     {
+        if (submerged != null && submerged.IsUpper(from) != submerged.IsUpper(to)) return false;
         var delta = to - from;
         return IsClear(from) && IsClear(to) && (delta.sqrMagnitude < 0.000001f || Physics2D.CircleCast(from, options.Radius, delta.normalized, filter, hits, delta.magnitude) == 0);
     }
@@ -139,13 +149,16 @@ public class MapPathRequest
     public bool DoorsChanged()
     {
         for (var i = 0; i < doors.Length; i++)
-            if (!doors[i] || doors[i].IsOpen != doorStates[i])
-                return true;
+        {
+            if (submerged != null && submerged.IsElevatorDoor(doors[i])) continue;
+            if (!doors[i] || doors[i].IsOpen != doorStates[i]) return true;
+        }
         return false;
     }
 
     public void CollectLinks()
     {
+        submerged?.AddLinks(this);
         if (options.UseLadders)
             foreach (var ladder in ship.GetComponentsInChildren<Ladder>())
                 if (ladder.isActiveAndEnabled && ladder.Destination && ladder.Destination.isActiveAndEnabled)
@@ -164,10 +177,13 @@ public class MapPathRequest
         if (options.UseVents)
             foreach (var vent in ship.AllVents)
             {
-                if (!VentAvailable(vent)) continue;
+                if (!VentAvailable(vent) || (submerged != null && vent.Id == submerged.EngineVentId)) continue;
                 foreach (var next in new[] { vent.Left, vent.Right, vent.Center })
                     if (VentAvailable(next))
-                        AddTransportLink(vent.transform.position + vent.Offset, next.transform.position + next.Offset, vent.UsableDistance, next.UsableDistance, PathTraversal.Vent, vent);
+                    {
+                        if (submerged != null) submerged.AddVentLink(this, vent, next);
+                        else AddTransportLink(vent.transform.position + vent.Offset, next.transform.position + next.Offset, vent.UsableDistance, next.UsableDistance, PathTraversal.Vent, vent);
+                    }
             }
 
         if (options.UseMovingPlatforms)
@@ -198,11 +214,11 @@ public class MapPathRequest
     public bool VentAvailable(Vent vent)
     {
         if (!vent || !vent.isActiveAndEnabled) return false;
-        if (actor && (actor.Data == null || actor.Data.IsDead || !actor.Data.Role || !actor.Data.Role.CanVent || !actor.Data.Role.CanUse(vent.Cast<IUsable>()) || actor.MustCleanVent(vent.Id))) return false;
+        if (actor && (actor != PlayerControl.LocalPlayer || actor.Data == null || actor.Data.IsDead || !actor.Data.Role || !actor.Data.Role.CanVent || !actor.Data.Role.CanUse(vent.Cast<IUsable>()) || actor.MustCleanVent(vent.Id))) return false;
         if (ship.Systems.TryGetValue(SystemTypes.Ventilation, out var system))
         {
             var ventilation = system.TryCast<VentilationSystem>();
-            if (ventilation != null && ventilation.IsVentCurrentlyBeingCleaned(vent.Id)) return false;
+            if (ventilation != null && (submerged != null ? submerged.IsVentBlocked(vent, ventilation) : ventilation.IsVentCurrentlyBeingCleaned(vent.Id))) return false;
         }
 
         return true;
@@ -230,7 +246,7 @@ public class MapPathRequest
 
     public void AddDoorLink(SomeKindaDoor door, PathTraversal type = PathTraversal.Decontamination)
     {
-        if (!door || !door.isActiveAndEnabled)
+        if (!door || !door.isActiveAndEnabled || (submerged != null && submerged.IsElevatorDoor(door)))
             return;
         var manual = door.TryCast<ManualDoor>();
         var plain = door.TryCast<PlainDoor>();

@@ -1,4 +1,5 @@
 using PathfindingAPI.Movement;
+using PathfindingAPI.Compatibility;
 using PathfindingAPI.Options;
 using System;
 using System.Collections;
@@ -8,6 +9,10 @@ namespace PathfindingAPI.Navigation;
 
 public static class MapPathfinding
 {
+    public static bool IsSubmergedLoaded() => SubmergedCompatibility.IsLoaded();
+
+    public static bool IsSubmergedMap() => ShipStatus.Instance && (int)ShipStatus.Instance.Type == 6 && SubmergedCompatibility.IsLoaded();
+
     public static MapPathRequest CreateRequest(PlayerControl player, Vector2 goal, PathOptions options = null)
     {
         if (!player)
