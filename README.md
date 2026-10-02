@@ -2,6 +2,11 @@
   <img src="github/logo.png" width="180" alt="Pathfinding API Logo">
 </p>
 
+<p align="center">
+    <a href="https://starlight.allofus.dev/mods/com.callofcreator.pathfinding">
+        <img src="https://raw.githubusercontent.com/All-Of-Us-Mods/allofus.dev/refs/heads/master/static/images/starlight-badge.svg" alt="Starlight badge">
+    </a>
+
 # Pathfinding API
 
 An Among Us mod that adds pathfinding support for other mod developers to use.
