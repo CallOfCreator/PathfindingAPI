@@ -99,6 +99,52 @@ For grid spacing, wall costs, and other pathfinding settings, see [PathOptions.c
 
 Movement tolerance is in [PathMovementSettings.cs](PathfindingAPI/Options/PathMovementSettings.cs). Pass these settings to `CoMoveTo` or `FollowPath` when you need to change them.
 
+## Move a GameObject
+
+```csharp
+Coroutines.Start(go.CoMoveTo(
+    new Vector2(x, y),
+    2.5f,
+    result => OnMovementEnded(result)));
+```
+
+`go` is the GameObject you want to move. The speed is in world units per second.
+
+GameObjects use walking routes and do not require a `PlayerControl`. Movement changes the object's position locally. Your mod needs to handle networking for GameObjects if you want them to be networked.
+
+You can also follow a route you already planned:
+
+```csharp
+Coroutines.Start(go.FollowPath(
+    path,
+    2.5f,
+    result => OnMovementEnded(result)));
+```
+
+Routes with transport crossings cannot be followed by GameObjects.
+
+## Move to a task
+
+`CoDoTask` finds a console for an unfinished task assigned to the player, moves there, then runs your action.
+
+```csharp
+Coroutines.Start(PlayerControl.LocalPlayer.CoDoTask(
+    TaskTypes.UnlockManifolds,
+    (player, task, console) =>
+    {
+        player.RpcCompleteTask(task.Id);
+        return null;
+    },
+    result => OnMovementEnded(result),
+    options: new PathOptions { AutoOpenDoors = true }));
+```
+
+This example completes an assigned single-step task after arrival. Replace the action with your own task logic Return a coroutine if the action takes time, or `null` if it finishes immediately.
+
+You can pass a `PlayerTask` instead of a `TaskTypes` value to select a specific assigned task.
+
+Call this on the client that owns the player. The API handles reaching the console; your action handles the task. `Arrived` does not confirm that your action completed the task.
+
 ## Find a route without moving
 
 Create a request using two `Vector2` positions. `start` is the starting position and `goal` is the destination.
@@ -183,6 +229,7 @@ Elevators appear in `path.Crossings` as `PathTraversal.Elevator`. If you are usi
 | `Blocked` | The player stopped moving or failed to make progress. |
 | `TraversalFailed` | A transport, crossing, or doorway could not be used. |
 | `InvalidPath` | The supplied path contains invalid waypoint or crossing data. |
+| `InvalidTarget` | The GameObject, task, or console cannot be used. |
 
 # Credits
 
