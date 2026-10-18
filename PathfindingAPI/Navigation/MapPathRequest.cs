@@ -16,13 +16,15 @@ public class MapPathRequest
     public readonly Il2CppStructArray<RaycastHit2D> crossingHits = new(32);
     public readonly SubmergedCompatibility submerged;
     public readonly PlayerControl actor;
+    public readonly GameObject go;
+    public readonly Console console;
     public readonly ShipStatus ship;
     public readonly PathOptions options;
     public readonly OpenableDoor[] doors;
     public readonly bool[] doorStates;
     public readonly ContactFilter2D filter;
-    public readonly Il2CppStructArray<RaycastHit2D> hits = new(1);
-    public readonly Il2CppReferenceArray<Collider2D> overlaps = new(1);
+    public readonly Il2CppStructArray<RaycastHit2D> hits;
+    public readonly Il2CppReferenceArray<Collider2D> overlaps;
     public readonly WalkingGrid grid;
     public readonly AStarSearch<int> search;
 
@@ -30,15 +32,19 @@ public class MapPathRequest
     public PathStatus Status => Result?.Status ?? search.Status;
     public int ExpandedNodes => search?.ExpandedNodes ?? 0;
 
-    public MapPathRequest(ShipStatus ship, Vector2 start, Vector2 goal, PathOptions options, PlayerControl actor = null)
+    public MapPathRequest(ShipStatus ship, Vector2 start, Vector2 goal, PathOptions options, PlayerControl actor = null, Console console = null, GameObject go = null)
     {
         options ??= new PathOptions();
         if (!float.IsFinite(options.CellSize) || options.CellSize <= 0f || !float.IsFinite(options.Radius) || options.Radius <= 0f || !float.IsFinite(options.ConnectionRange) || options.ConnectionRange < options.CellSize || options.NodeLimit <= 0 || options.BatchSize <= 0 || !float.IsFinite(options.WallWeight) || options.WallWeight < 0f || !float.IsFinite(options.WallDistance) || options.WallDistance <= 0f)
             throw new ArgumentOutOfRangeException(nameof(options));
 
         this.actor = actor;
+        this.console = console;
+        this.go = go;
         this.ship = ship;
         this.options = options;
+        hits = new Il2CppStructArray<RaycastHit2D>(go ? 32 : 1);
+        overlaps = new Il2CppReferenceArray<Collider2D>(go ? 32 : 1);
         filter = new ContactFilter2D { useLayerMask = true, layerMask = Constants.ShipAndAllObjectsMask, useTriggers = false };
         if (!ship || !float.IsFinite(start.x) || !float.IsFinite(start.y) || !float.IsFinite(goal.x) || !float.IsFinite(goal.y))
         {
@@ -73,15 +79,17 @@ public class MapPathRequest
 
         bounds.Expand(options.CellSize * 2f);
         var area = new Rect(bounds.min.x, bounds.min.y, bounds.size.x, bounds.size.y);
-        if (!hasBounds || !area.Contains(start) || !area.Contains(goal) || !IsClear(start) || !IsClear(goal))
+        if (!hasBounds || !area.Contains(start) || !IsClear(start) || !console && (!area.Contains(goal) || !IsClear(goal)))
         {
             Finish(PathStatus.InvalidEndpoint);
             return;
         }
 
-        CollectLinks();
+        if (!go)
+            CollectLinks();
         grid = new WalkingGrid(start, goal, area, options.CellSize, options.ConnectionRange, IsClear, CanMove, links, options.WallWeight > 0f ? WallPenalty : null);
-        search = new AStarSearch<int>(WalkingGrid.StartNode, WalkingGrid.GoalNode, grid.Edges, grid.Estimate, options.NodeLimit);
+        var usableDistance = console ? console.UsableDistance : 0f;
+        search = console ? new AStarSearch<int>(WalkingGrid.StartNode, WalkingGrid.GoalNode, grid.Edges, node => Math.Max(0f, grid.Estimate(node) - usableDistance), options.NodeLimit, node => CanUseConsole(grid.Position(node))) : new AStarSearch<int>(WalkingGrid.StartNode, WalkingGrid.GoalNode, grid.Edges, grid.Estimate, options.NodeLimit);
     }
 
     public IEnumerator Run()
@@ -128,14 +136,46 @@ public class MapPathRequest
 
     public bool IsClear(Vector2 point)
     {
-        return Physics2D.OverlapCircle(point, options.Radius, filter, overlaps) == 0;
+        return IsClear(point, options.Radius);
+    }
+
+    public bool IsClear(Vector2 point, float radius)
+    {
+        var count = Physics2D.OverlapCircle(point, radius, filter, overlaps);
+        if (count == overlaps.Length)
+            return false;
+        for (var i = 0; i < count; i++)
+        {
+            if (IsObstacle(overlaps[i]))
+                return false;
+        }
+        return true;
+    }
+
+    public bool IsObstacle(Collider2D collider)
+    {
+        return !go || !collider.transform.IsChildOf(go.transform);
+    }
+
+    public bool CanUseConsole(Vector2 point)
+    {
+        if (!console || !console.isActiveAndEnabled)
+            return false;
+        var position = console.transform.position;
+        if (Vector2.Distance(point, position) > console.UsableDistance * 0.9f || console.onlyFromBelow && point.y >= position.y - 0.1f)
+            return false;
+        if (console.onlySameRoom && (!ship.FastRooms.TryGetValue(console.Room, out var room) || !room || !room.roomArea || !room.roomArea.OverlapPoint(point)))
+            return false;
+        return !console.checkWalls || !PhysicsHelpers.AnythingBetween(point, position, Constants.ShadowMask, false);
     }
 
     public float WallPenalty(Vector2 point)
     {
         for (var i = 1; i <= 3; i++)
-            if (Physics2D.OverlapCircle(point, options.Radius + options.WallDistance * i / 3f, filter, overlaps) > 0)
+        {
+            if (!IsClear(point, options.Radius + options.WallDistance * i / 3f))
                 return options.WallWeight * (4 - i) / 3f;
+        }
         return 0f;
     }
 
@@ -143,7 +183,42 @@ public class MapPathRequest
     {
         if (submerged != null && submerged.IsUpper(from) != submerged.IsUpper(to)) return false;
         var delta = to - from;
-        return IsClear(from) && IsClear(to) && (delta.sqrMagnitude < 0.000001f || Physics2D.CircleCast(from, options.Radius, delta.normalized, filter, hits, delta.magnitude) == 0);
+        if (!IsClear(from) || !IsClear(to))
+            return false;
+        if (delta.sqrMagnitude < 0.000001f)
+            return true;
+        var count = Physics2D.CircleCast(from, options.Radius, delta.normalized, filter, hits, delta.magnitude);
+        if (count == hits.Length)
+            return false;
+        for (var i = 0; i < count; i++)
+        {
+            if (IsObstacle(hits[i].collider))
+                return false;
+        }
+        return true;
+    }
+
+    public bool FindRecoveryPoint(Vector2 from, Vector2 target, out Vector2 point)
+    {
+        var forward = (target - from).normalized;
+        var side = new Vector2(-forward.y, forward.x);
+        var best = float.MaxValue;
+        point = from;
+        for (var i = 1; i <= 4; i++)
+        {
+            for (var sign = -1; sign <= 1; sign += 2)
+            {
+                var candidate = from + side * (sign * options.CellSize * i / 2f) - forward * (options.CellSize / 2f);
+                if (!CanMove(from, candidate) || !CanMove(candidate, target))
+                    continue;
+                var weight = Vector2.Distance(candidate, target) + Vector2.Distance(from, candidate) + WallPenalty(candidate) * 2f;
+                if (weight >= best)
+                    continue;
+                best = weight;
+                point = candidate;
+            }
+        }
+        return best < float.MaxValue;
     }
 
     public bool DoorsChanged()
@@ -161,8 +236,10 @@ public class MapPathRequest
         submerged?.AddLinks(this);
         if (options.UseLadders)
             foreach (var ladder in ship.GetComponentsInChildren<Ladder>())
+            {
                 if (ladder.isActiveAndEnabled && ladder.Destination && ladder.Destination.isActiveAndEnabled)
                     AddTransportLink(ladder.transform.position, ladder.Destination.transform.position, ladder.UsableDistance, ladder.Destination.UsableDistance, PathTraversal.Ladder, ladder);
+            }
 
         if (options.UseZiplines)
             foreach (var console in ship.GetComponentsInChildren<ZiplineConsole>())
@@ -177,19 +254,21 @@ public class MapPathRequest
         if (options.UseVents)
             foreach (var vent in ship.AllVents)
             {
-                if (!VentAvailable(vent) || (submerged != null && vent.Id == submerged.EngineVentId)) continue;
+                if (!VentAvailable(vent) || submerged != null && vent.Id == submerged.EngineVentId) continue;
                 foreach (var next in new[] { vent.Left, vent.Right, vent.Center })
+                {
                     if (VentAvailable(next))
                     {
                         if (submerged != null) submerged.AddVentLink(this, vent, next);
                         else AddTransportLink(vent.transform.position + vent.Offset, next.transform.position + next.Offset, vent.UsableDistance, next.UsableDistance, PathTraversal.Vent, vent);
                     }
+                }
             }
 
         if (options.UseMovingPlatforms)
             foreach (var platform in ship.GetComponentsInChildren<MovingPlatformBehaviour>())
             {
-                if (!platform.isActiveAndEnabled || !platform.transform.parent || (GameOptionsManager.Instance.CurrentGameOptions.GameMode == AmongUs.GameOptions.GameModes.HideNSeek && platform.DisabledPosition != Vector3.zero))
+                if (!platform.isActiveAndEnabled || !platform.transform.parent || GameOptionsManager.Instance.CurrentGameOptions.GameMode == AmongUs.GameOptions.GameModes.HideNSeek && platform.DisabledPosition != Vector3.zero)
                     continue;
                 var parent = platform.transform.parent;
                 var left = (Vector2)parent.TransformPoint(platform.LeftUsePosition);
@@ -204,11 +283,13 @@ public class MapPathRequest
 
         if (options.UseDecontamination)
             foreach (var decon in ship.GetComponentsInChildren<DeconSystem>())
+            {
                 if (decon.isActiveAndEnabled)
                 {
                     AddDoorLink(decon.UpperDoor);
                     AddDoorLink(decon.LowerDoor);
                 }
+            }
     }
 
     public bool VentAvailable(Vent vent)
@@ -246,7 +327,7 @@ public class MapPathRequest
 
     public void AddDoorLink(SomeKindaDoor door, PathTraversal type = PathTraversal.Decontamination)
     {
-        if (!door || !door.isActiveAndEnabled || (submerged != null && submerged.IsElevatorDoor(door)))
+        if (!door || !door.isActiveAndEnabled || submerged != null && submerged.IsElevatorDoor(door))
             return;
         var manual = door.TryCast<ManualDoor>();
         var plain = door.TryCast<PlainDoor>();
@@ -277,8 +358,10 @@ public class MapPathRequest
         if (count == crossingHits.Length)
             return false;
         for (var i = 0; i < count; i++)
+        {
             if (crossingHits[i].collider != collider && crossingHits[i].collider != shadow)
                 return false;
+        }
         return true;
     }
 
@@ -314,7 +397,7 @@ public class MapPathRequest
         var length = 0f;
         for (var i = 1; i < points.Count; i++)
             length += Vector2.Distance(points[i - 1], points[i]);
-        Result = new MapPath(PathStatus.Found, points.ToArray(), length, ExpandedNodes) { Ship = ship, Crossings = crossings.ToArray(), AutoOpenDoors = options.AutoOpenDoors };
+        Result = new MapPath(PathStatus.Found, points.ToArray(), length, ExpandedNodes) { Ship = ship, Crossings = crossings.ToArray(), AutoOpenDoors = options.AutoOpenDoors, Radius = options.Radius, Console = console };
     }
 
     public void Finish(PathStatus status)

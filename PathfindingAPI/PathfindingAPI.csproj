@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
-        <VersionPrefix>1.0.0</VersionPrefix>
+        <VersionPrefix>1.0.3</VersionPrefix>
         <PackageId>CallOfCreator.PathfindingAPI</PackageId>
         <Description>An Among Us mod that adds pathfinding to the game for developers to use</Description>
         <Authors>CallofCreator</Authors>

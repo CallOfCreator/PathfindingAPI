@@ -29,7 +29,7 @@ public static class PlayerPathExtensions
     public static IEnumerator FollowPath(this PlayerControl player, MapPath path, Action<PathMovementResult> completed = null, PathMovementSettings options = null)
     {
         options ??= new PathMovementSettings();
-        if (!float.IsFinite(options.Tolerance) || options.Tolerance <= 0f || options.Tolerance > 0.25f || !float.IsFinite(options.StuckTimeout) || options.StuckTimeout <= 0f || !float.IsFinite(options.TraversalTimeout) || options.TraversalTimeout <= 0f)
+        if (!float.IsFinite(options.Tolerance) || options.Tolerance <= 0f || options.Tolerance > 0.25f || !float.IsFinite(options.StuckTimeout) || options.StuckTimeout <= 0f || !float.IsFinite(options.TraversalTimeout) || options.TraversalTimeout <= 0f || options.RecoveryAttempts < 0)
             throw new ArgumentOutOfRangeException(nameof(options));
 
         var status = PathMovementStatus.Arrived;
@@ -59,6 +59,8 @@ public static class PlayerPathExtensions
         var crossingIndex = 0;
         try
         {
+            var request = MapPathfinding.CreateRequest(player.gameObject, path.Points[^1], new PathOptions { Radius = path.Radius });
+            request.Cancel();
             foreach (var crossing in path.Crossings)
             {
                 if (crossing.PointIndex < crossingIndex || crossing.PointIndex + 1 >= path.Points.Length)
@@ -87,9 +89,12 @@ public static class PlayerPathExtensions
                     break;
                 }
 
-                var walking = player.MyPhysics.WalkPlayerTo(target, options.Tolerance * options.Tolerance, player.MyPhysics.TrueSpeed / player.MyPhysics.Speed);
+                var tolerance = pointIndex < path.Points.Length - 1 || path.Console ? Math.Min(options.Tolerance, 0.01f) : options.Tolerance;
+                var walking = player.MyPhysics.WalkPlayerTo(target, tolerance * tolerance, player.MyPhysics.TrueSpeed / player.MyPhysics.Speed);
                 var position = player.GetTruePosition();
                 var stalled = 0f;
+                var attempts = 0;
+                var recovering = false;
                 player.moveable = false;
                 try
                 {
@@ -101,18 +106,20 @@ public static class PlayerPathExtensions
                             break;
                         }
 
-                        if (Vector2.Distance(player.GetTruePosition(), target) <= options.Tolerance)
-                            break;
-                        if (!walking.MoveNext())
+                        var current = player.GetTruePosition();
+                        if (Vector2.Distance(current, target) <= tolerance)
                         {
-                            if (Vector2.Distance(player.GetTruePosition(), target) > options.Tolerance)
-                                status = PathMovementStatus.Blocked;
-                            break;
+                            if (!recovering)
+                                break;
+                            target = path.Points[pointIndex];
+                            recovering = false;
+                            stalled = 0f;
+                            walking = player.MyPhysics.WalkPlayerTo(target, tolerance * tolerance, player.MyPhysics.TrueSpeed / player.MyPhysics.Speed);
                         }
 
-                        if (Vector2.Distance(position, player.GetTruePosition()) >= 0.01f)
+                        if (Vector2.Distance(position, current) >= 0.01f)
                         {
-                            position = player.GetTruePosition();
+                            position = current;
                             stalled = 0f;
                         }
                         else
@@ -120,8 +127,16 @@ public static class PlayerPathExtensions
                             stalled += Time.deltaTime;
                         }
 
-                        if (stalled >= options.StuckTimeout)
+                        if (!walking.MoveNext() || stalled >= options.StuckTimeout)
                         {
+                            player.MyPhysics.body.velocity = Vector2.zero;
+                            if (attempts++ < options.RecoveryAttempts && request.FindRecoveryPoint(current, path.Points[pointIndex], out target))
+                            {
+                                recovering = true;
+                                stalled = 0f;
+                                walking = player.MyPhysics.WalkPlayerTo(target, tolerance * tolerance, player.MyPhysics.TrueSpeed / player.MyPhysics.Speed);
+                                continue;
+                            }
                             status = PathMovementStatus.Blocked;
                             break;
                         }
@@ -157,6 +172,18 @@ public static class PlayerPathExtensions
         finally
         {
             MovingPlayers.Remove(player);
+        }
+
+        if (status == PathMovementStatus.Arrived && path.Console is not null)
+        {
+            if (!path.Console || !path.Console.isActiveAndEnabled || !CanContinue(player, ship))
+                status = PathMovementStatus.Interrupted;
+            else
+            {
+                path.Console.CanUse(player.Data, out var allowed, out _);
+                if (!allowed)
+                    status = PathMovementStatus.InvalidTarget;
+            }
         }
 
         completed?.Invoke(new PathMovementResult(status, path, Math.Min(pointIndex, path.Points.Length - 1)));
