@@ -10,5 +10,6 @@ public enum PathMovementStatus
     Busy,
     Blocked,
     TraversalFailed,
-    InvalidPath
+    InvalidPath,
+    InvalidTarget,
 }

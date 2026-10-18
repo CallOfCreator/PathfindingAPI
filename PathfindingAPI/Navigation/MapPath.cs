@@ -12,6 +12,8 @@ public class MapPath
     public readonly int ExpandedNodes;
     public ShipStatus Ship;
     public bool AutoOpenDoors;
+    public float Radius = 0.18f;
+    public Console Console;
     public PathCrossing[] Crossings = Array.Empty<PathCrossing>();
 
     public MapPath(PathStatus status, Vector2[] points, float length, int expandedNodes)

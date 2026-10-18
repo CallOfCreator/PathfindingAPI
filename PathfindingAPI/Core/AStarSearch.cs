@@ -8,6 +8,7 @@ public class AStarSearch<T> where T : notnull
     public readonly T goal;
     public readonly Func<T, IEnumerable<PathEdge<T>>> getEdges;
     public readonly Func<T, float> estimate;
+    public readonly Func<T, bool> reached;
     public readonly int nodeLimit;
     public readonly PriorityQueue<(T Node, float Cost), float> frontier = new();
     public readonly Dictionary<T, float> costs = new();
@@ -18,7 +19,7 @@ public class AStarSearch<T> where T : notnull
     public float Cost { get; private set; } = float.PositiveInfinity;
     public int ExpandedNodes { get; private set; }
 
-    public AStarSearch(T start, T goal, Func<T, IEnumerable<PathEdge<T>>> getEdges, Func<T, float> estimate, int nodeLimit = 30000)
+    public AStarSearch(T start, T goal, Func<T, IEnumerable<PathEdge<T>>> getEdges, Func<T, float> estimate, int nodeLimit = 30000, Func<T, bool> reached = null)
     {
         if (nodeLimit <= 0)
             throw new ArgumentOutOfRangeException(nameof(nodeLimit));
@@ -26,6 +27,7 @@ public class AStarSearch<T> where T : notnull
         this.goal = goal;
         this.getEdges = getEdges;
         this.estimate = estimate;
+        this.reached = reached;
         this.nodeLimit = nodeLimit;
         costs[start] = 0f;
         frontier.Enqueue((start, 0f), Estimate(start));
@@ -47,10 +49,10 @@ public class AStarSearch<T> where T : notnull
             if (current.Cost != costs[current.Node])
                 continue;
 
-            if (EqualityComparer<T>.Default.Equals(current.Node, goal))
+            if (reached?.Invoke(current.Node) ?? EqualityComparer<T>.Default.Equals(current.Node, goal))
             {
-                var path = new List<T> { goal };
-                var node = goal;
+                var path = new List<T> { current.Node };
+                var node = current.Node;
                 while (parents.TryGetValue(node, out var parent))
                 {
                     path.Add(parent);

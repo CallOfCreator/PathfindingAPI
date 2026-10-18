@@ -17,7 +17,7 @@ namespace PathfindingAPI;
 public class PathfindingPlugin : BasePlugin
 {
     public const string Id = "com.callofcreator.pathfinding";
-    public const string Version = "1.0.2";
+    public const string Version = "1.0.3";
 
     public override void Load()
     {
