@@ -1,0 +1,70 @@
+name: PathfindingAPI CI
+
+on:
+  push:
+    branches: [main, dev]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      BuildingInsideCI: true
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/packages.lock.json', 'NuGet.Config', 'global.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Setup .NET 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore NuGet Packages
+        run: dotnet restore PathfindingAPI/PathfindingAPI.csproj
+
+      - name: Build PathfindingAPI (Release)
+        run: dotnet build PathfindingAPI/PathfindingAPI.csproj --configuration Release --no-restore
+
+      - name: Upload PathfindingAPI DLL (Release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PathfindingAPI
+          path: PathfindingAPI/bin/Release/net6.0/PathfindingAPI.dll
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Release DLL
+        uses: actions/download-artifact@v4
+        with:
+          name: PathfindingAPI
+          path: ./release_artifacts
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: ./release_artifacts/PathfindingAPI.dll
+          fail_on_unmatched_files: true
