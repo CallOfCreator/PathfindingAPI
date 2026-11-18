@@ -64,21 +64,29 @@ public class MapPathRequest
         for (var i = 0; i < doors.Length; i++)
             doorStates[i] = doors[i] && doors[i].IsOpen;
 
-        var bounds = new Bounds();
+        var minX = float.MaxValue;
+        var minY = float.MaxValue;
+        var maxX = float.MinValue;
+        var maxY = float.MinValue;
         var hasBounds = false;
         foreach (var room in ship.AllRooms)
         {
-            if (!room.roomArea)
-                continue;
-            if (hasBounds)
-                bounds.Encapsulate(room.roomArea.bounds);
-            else
-                bounds = room.roomArea.bounds;
+            if (!room.roomArea) continue;
+            
+            var bounds = room.roomArea.bounds;
+            minX = Math.Min(minX, bounds.min.x);
+            minY = Math.Min(minY, bounds.min.y);
+            maxX = Math.Max(maxX, bounds.max.x);
+            maxY = Math.Max(maxY, bounds.max.y);
             hasBounds = true;
         }
 
-        bounds.Expand(options.CellSize * 2f);
-        var area = new Rect(bounds.min.x, bounds.min.y, bounds.size.x, bounds.size.y);
+        var expand = options.CellSize * 2f;
+        minX -= expand * 0.5f;
+        minY -= expand * 0.5f;
+        maxX += expand * 0.5f;
+        maxY += expand * 0.5f;
+        var area = new Rect(minX, minY, Math.Max(0f, maxX - minX), Math.Max(0f, maxY - minY));
         if (!hasBounds || !area.Contains(start) || !IsClear(start) || !console && (!area.Contains(goal) || !IsClear(goal)))
         {
             Finish(PathStatus.InvalidEndpoint);
@@ -141,7 +149,7 @@ public class MapPathRequest
 
     public bool IsClear(Vector2 point, float radius)
     {
-        var count = Physics2D.OverlapCircle(point, radius, filter, overlaps);
+        var count = Physics2D.defaultPhysicsScene.OverlapCircle(point, radius, filter, overlaps);
         if (count == overlaps.Length)
             return false;
         for (var i = 0; i < count; i++)
@@ -179,6 +187,57 @@ public class MapPathRequest
         return 0f;
     }
 
+    [ThreadStatic]
+    private static Il2CppStructArray<RaycastHit2D> _castBuffer;
+    private static Il2CppStructArray<RaycastHit2D> CastBuffer => _castBuffer ??= new(1);
+
+    public static int CircleCast(Vector2 origin, float radius, Vector2 direction, ContactFilter2D filter, Il2CppStructArray<RaycastHit2D> results, float distance)
+    {
+        if (results == null || results.Length == 0) return 0;
+        
+        if (radius <= 0.0001f) return Physics2D.Raycast(origin, direction, filter, results, distance);
+        
+        var count = Physics2D.Raycast(origin, direction, filter, results, distance);
+        if (results.Length == 1 && count > 0) return count;
+        
+        var normal = new Vector2(-direction.y, direction.x);
+        var buffer = CastBuffer;
+        Span<float> multipliers = stackalloc float[] { 1f, -1f, 0.5f, -0.5f };
+        
+        for (var i = 0; i < multipliers.Length; i++)
+        {
+            var rayOrigin = origin + normal * (radius * multipliers[i]);
+            var hitCount = Physics2D.Raycast(rayOrigin, direction, filter, buffer, distance);
+            if (hitCount > 0)
+            {
+                var hit = buffer[0];
+                if (results.Length == 1)
+                {
+                    results[0] = hit;
+                    return 1;
+                }
+
+                var exists = false;
+                for (var j = 0; j < count; j++)
+                {
+                    if (results[j].collider == hit.collider)
+                    {
+                        exists = true;
+                        break;
+                    }
+                }
+
+                if (!exists)
+                {
+                    results[count++] = hit;
+                    if (count >= results.Length) return count;
+                }
+            }
+        }
+
+        return count;
+    }
+
     public bool CanMove(Vector2 from, Vector2 to)
     {
         if (submerged != null && submerged.IsUpper(from) != submerged.IsUpper(to)) return false;
@@ -187,7 +246,7 @@ public class MapPathRequest
             return false;
         if (delta.sqrMagnitude < 0.000001f)
             return true;
-        var count = Physics2D.CircleCast(from, options.Radius, delta.normalized, filter, hits, delta.magnitude);
+        var count = CircleCast(from, options.Radius, delta.normalized, filter, hits, delta.magnitude);
         if (count == hits.Length)
             return false;
         for (var i = 0; i < count; i++)
@@ -268,7 +327,7 @@ public class MapPathRequest
         if (options.UseMovingPlatforms)
             foreach (var platform in ship.GetComponentsInChildren<MovingPlatformBehaviour>())
             {
-                if (!platform.isActiveAndEnabled || !platform.transform.parent || GameOptionsManager.Instance.CurrentGameOptions.GameMode == AmongUs.GameOptions.GameModes.HideNSeek && platform.DisabledPosition != Vector3.zero)
+                if (!platform.isActiveAndEnabled || !platform.transform.parent || (GameOptionsManager.Instance?.CurrentGameOptions?.GameMode == AmongUs.GameOptions.GameModes.HideNSeek && platform.DisabledPosition != Vector3.zero))
                     continue;
                 var parent = platform.transform.parent;
                 var left = (Vector2)parent.TransformPoint(platform.LeftUsePosition);
@@ -354,7 +413,7 @@ public class MapPathRequest
         var collider = manual ? manual.myCollider : plain ? plain.myCollider : null;
         var shadow = manual ? manual.shadowCollider : plain ? plain.shadowCollider : null;
         var delta = to - from;
-        var count = Physics2D.CircleCast(from, options.Radius, delta.normalized, filter, crossingHits, delta.magnitude);
+        var count = CircleCast(from, options.Radius, delta.normalized, filter, crossingHits, delta.magnitude);
         if (count == crossingHits.Length)
             return false;
         for (var i = 0; i < count; i++)
@@ -368,7 +427,10 @@ public class MapPathRequest
     public bool CanTraverse(int index)
     {
         var source = linkSources[index];
-        if (!source || !source.Cast<Behaviour>().isActiveAndEnabled)
+        if (!source)
+            return false;
+        var behaviour = source.TryCast<Behaviour>();
+        if (behaviour != null && !behaviour.isActiveAndEnabled)
             return false;
         var link = links[index];
         return link.Type is PathTraversal.Decontamination or PathTraversal.Door ? CanCrossDoor(link.Start, link.End, source.Cast<SomeKindaDoor>()) : IsClear(link.Start) && IsClear(link.End);

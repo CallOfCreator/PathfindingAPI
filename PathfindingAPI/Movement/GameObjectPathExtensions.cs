@@ -100,7 +100,7 @@ public static class GameObjectPathExtensions
                         stalled += Time.deltaTime;
                     }
 
-                    var next = Vector2.MoveTowards(current, target, speed * Time.deltaTime);
+                    var next = MoveTowards(current, target, speed * Time.deltaTime);
                     if (stalled >= options.StuckTimeout || !request.CanMove(current, next))
                     {
                         if (attempts++ < options.RecoveryAttempts && request.FindRecoveryPoint(current, path.Points[pointIndex], out target))
@@ -127,5 +127,16 @@ public static class GameObjectPathExtensions
         }
 
         completed?.Invoke(new PathMovementResult(status, path, Math.Min(pointIndex, path.Points.Length - 1)));
+    }
+
+    private static Vector2 MoveTowards(Vector2 current, Vector2 target, float maxDistanceDelta)
+    {
+        float deltaX = target.x - current.x;
+        float deltaY = target.y - current.y;
+        float distanceSquared = deltaX * deltaX + deltaY * deltaY;
+        
+        if (distanceSquared == 0f || (maxDistanceDelta >= 0f && distanceSquared <= maxDistanceDelta * maxDistanceDelta)) return target;
+        float distance = (float)Math.Sqrt(distanceSquared);
+        return new Vector2(current.x + deltaX / distance * maxDistanceDelta, current.y + deltaY / distance * maxDistanceDelta);
     }
 }
